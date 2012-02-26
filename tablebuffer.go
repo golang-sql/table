@@ -41,9 +41,9 @@ func FillRowBuffer(rows *sql.Rows) (table *TableBuffer, err error) {
 			for i, n := range table.ColumnNames {
 				table.ColumnNameMap[n] = i
 			}
+			dest = make([]interface{}, colCount)
 		}
 		out = make([]interface{}, colCount)
-		dest = make([]interface{}, colCount)
 		for i, _ := range dest {
 		   dest[i] = &out[i]
 		}
