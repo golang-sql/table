@@ -3,7 +3,7 @@ package tablebuffer
 
 import (
 	"database/sql"
-	"errors"
+	"fmt"
 )
 
 // Only holds row data.  No reference to parent table is kept.
@@ -15,6 +15,62 @@ type TableBuffer struct {
 	Rows          []RowBuffer
 	ColumnNames   []string
 	ColumnNameMap map[string]int
+}
+
+// Error returned when attempting to access a row or column which does
+// not exist.
+type TableIndexError struct {
+	forRow    bool
+	length    int
+	requested int
+
+	useName      bool
+	notFoundName string
+}
+
+func (tie *TableIndexError) Error() string {
+	if tie.useName {
+		return fmt.Sprintf(`Table doesn't have column named "%s"`, tie.notFoundName)
+	}
+	if tie.forRow {
+		return fmt.Sprintf("Table has %d rows, requested %d", tie.length, tie.requested)
+	}
+	return fmt.Sprintf("Table has %d columns, requested %d", tie.length, tie.requested)
+}
+
+// Helper function which takes a simple SQL string and returns a table buffer.
+func Get(db *sql.DB, sql string, params ...interface{}) (table *TableBuffer, err error) {
+	rows, err := db.Query(sql, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return FillRowBuffer(rows)
+}
+
+// Helper function which will return the first column value in the first row.
+func GetScaler(db *sql.DB, sql string, params ...interface{}) (value interface{}, err error) {
+	t, err := Get(db, sql, params...)
+	if err != nil {
+		return nil, err
+	}
+	if len(t.Rows) == 0 {
+		return nil, &TableIndexError{forRow: true, length: len(t.Rows), requested: 0}
+	}
+	if len(t.Rows[0]) == 0 {
+		return nil, &TableIndexError{forRow: false, length: len(t.Rows[0]), requested: 0}
+	}
+	return t.Rows[0][0], nil
+}
+
+// Same as GetScaler except it will panic on an error.
+func MustGetScaler(db *sql.DB, sql string, params ...interface{}) interface{} {
+	v, err := GetScaler(db, sql, params...)
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
 
 // FillRowBuffer will take a sql query result and fill the buffer with
@@ -75,10 +131,13 @@ func FillRowBuffer(rows *sql.Rows) (table *TableBuffer, err error) {
 // If I have a get the column name programmatically, I'd rather handle an error.
 
 // Get a value from a given row index and column name.
-func (t *TableBuffer) Get(rowIndex int, columnName string) (interface{}, error) {
+func (t *TableBuffer) GetScaler(rowIndex int, columnName string) (interface{}, error) {
 	i, ok := t.ColumnNameMap[columnName]
 	if !ok {
-		return nil, errors.New("Column name not found: " + columnName)
+		return nil, &TableIndexError{useName: true, notFoundName: columnName}
+	}
+	if len(t.Rows) <= rowIndex {
+		return nil, &TableIndexError{forRow: true, length: len(t.Rows), requested: rowIndex}
 	}
 	return t.Rows[rowIndex][i], nil
 }
@@ -86,10 +145,28 @@ func (t *TableBuffer) Get(rowIndex int, columnName string) (interface{}, error) 
 // Get a value from a given row index and column name.
 // Will panic if the requested column name is not found.  Useful for a single
 // value return with a hard coded column name.
-func (t *TableBuffer) GetPanic(rowIndex int, columnName string) interface{} {
+func (t *TableBuffer) MustGetScaler(rowIndex int, columnName string) interface{} {
+	v, err := t.GetScaler(rowIndex, columnName)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// Returns a value based on a row object and a column name.
+func (t *TableBuffer) GetInRow(row RowBuffer, columnName string) (interface{}, error) {
 	i, ok := t.ColumnNameMap[columnName]
 	if !ok {
-		panic("Column name not found: " + columnName)
+		return nil, &TableIndexError{useName: true, notFoundName: columnName}
 	}
-	return t.Rows[rowIndex][i]
+	return row[i], nil
+}
+
+// Same as GetInRow excepts panics if an error is encountered.
+func (t *TableBuffer) MustGetInRow(row RowBuffer, columnName string) interface{} {
+	v, err := t.GetInRow(row, columnName)
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
