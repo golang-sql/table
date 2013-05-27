@@ -8,8 +8,8 @@ import (
 
 // Only holds row data.  No reference to parent table is kept.
 type RowBuffer struct {
-	*TableBuffer
-	Data []interface{}
+	*TableBuffer `json:"-"`
+	Data         []interface{}
 }
 
 // Table buffer provides a buffer for you table.  ColumnNameMap is the
