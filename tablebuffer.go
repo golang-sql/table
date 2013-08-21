@@ -1,5 +1,5 @@
 // Provides a simple buffer for results from database/sql.
-package tablebuffer
+package table
 
 import (
 	"database/sql"
@@ -7,22 +7,21 @@ import (
 )
 
 // Only holds row data.  No reference to parent table is kept.
-type RowBuffer struct {
-	*TableBuffer `json:"-"`
-	Data         []interface{}
+type Row struct {
+	*Buffer `json:"-",xml:"-"`
+	Data    []interface{}
 }
 
-// Table buffer provides a buffer for you table.  ColumnNameMap is the
-// "inverse" of ColumnNames.
-type TableBuffer struct {
-	Rows          []RowBuffer
-	ColumnNames   []string
-	ColumnNameMap map[string]int
+// A buffered data table.  ColumnNameLookup is the inverse of ColumnName.
+type Buffer struct {
+	Rows             []Row
+	ColumnName       []string
+	ColumnNameLookup map[string]int
 }
 
 // Error returned when attempting to access a row or column which does
 // not exist.
-type TableIndexError struct {
+type IndexError struct {
 	forRow    bool
 	length    int
 	requested int
@@ -31,7 +30,7 @@ type TableIndexError struct {
 	notFoundName string
 }
 
-func (tie *TableIndexError) Error() string {
+func (tie *IndexError) Error() string {
 	if tie.useName {
 		return fmt.Sprintf(`Table doesn't have column named "%s"`, tie.notFoundName)
 	}
@@ -42,14 +41,14 @@ func (tie *TableIndexError) Error() string {
 }
 
 // Helper function which takes a simple SQL string and returns a table buffer.
-func Get(db *sql.DB, sql string, params ...interface{}) (table *TableBuffer, err error) {
+func Get(db *sql.DB, sql string, params ...interface{}) (table *Buffer, err error) {
 	rows, err := db.Query(sql, params...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	return FillRowBuffer(rows)
+	return FillRow(rows)
 }
 
 // Helper function which will return the first column value in the first row.
@@ -59,10 +58,10 @@ func GetScaler(db *sql.DB, sql string, params ...interface{}) (value interface{}
 		return nil, err
 	}
 	if len(t.Rows) == 0 {
-		return nil, &TableIndexError{forRow: true, length: len(t.Rows), requested: 0}
+		return nil, &IndexError{forRow: true, length: len(t.Rows), requested: 0}
 	}
 	if len(t.Rows[0].Data) == 0 {
-		return nil, &TableIndexError{forRow: false, length: len(t.Rows[0].Data), requested: 0}
+		return nil, &IndexError{forRow: false, length: len(t.Rows[0].Data), requested: 0}
 	}
 	return t.Rows[0].Data[0], nil
 }
@@ -76,14 +75,14 @@ func MustGetScaler(db *sql.DB, sql string, params ...interface{}) interface{} {
 	return v
 }
 
-// FillRowBuffer will take a sql query result and fill the buffer with
+// FillRow will take a sql query result and fill the buffer with
 // the entire result set.
-func FillRowBuffer(rows *sql.Rows) (table *TableBuffer, err error) {
+func FillRow(rows *sql.Rows) (table *Buffer, err error) {
 	var out []interface{}
 	var dest []interface{}
 
-	table = &TableBuffer{
-		Rows: make([]RowBuffer, 0),
+	table = &Buffer{
+		Rows: make([]Row, 0),
 	}
 	first := true
 	colCount := 0
@@ -94,17 +93,17 @@ func FillRowBuffer(rows *sql.Rows) (table *TableBuffer, err error) {
 			first = false
 
 			// Get the column names.
-			table.ColumnNames, err = rows.Columns()
+			table.ColumnName, err = rows.Columns()
 			if err != nil {
 				return
 			}
-			colCount = len(table.ColumnNames)
+			colCount = len(table.ColumnName)
 
 			// Create an easy lookup that should be more efficent then
 			// always looping to lookup an index from a column name.
-			table.ColumnNameMap = make(map[string]int, colCount)
-			for i, n := range table.ColumnNames {
-				table.ColumnNameMap[n] = i
+			table.ColumnNameLookup = make(map[string]int, colCount)
+			for i, n := range table.ColumnName {
+				table.ColumnNameLookup[n] = i
 			}
 
 			// Create a sized pointer slice.
@@ -124,9 +123,9 @@ func FillRowBuffer(rows *sql.Rows) (table *TableBuffer, err error) {
 		if err != nil {
 			return
 		}
-		table.Rows = append(table.Rows, RowBuffer{
-			TableBuffer: table,
-			Data:        out,
+		table.Rows = append(table.Rows, Row{
+			Buffer: table,
+			Data:   out,
 		})
 	}
 	return
@@ -137,13 +136,13 @@ func FillRowBuffer(rows *sql.Rows) (table *TableBuffer, err error) {
 // If I have a get the column name programmatically, I'd rather handle an error.
 
 // Get a value from a given row index and column name.
-func (t *TableBuffer) GetScaler(rowIndex int, columnName string) (interface{}, error) {
-	i, ok := t.ColumnNameMap[columnName]
+func (t *Buffer) GetScaler(rowIndex int, columnName string) (interface{}, error) {
+	i, ok := t.ColumnNameLookup[columnName]
 	if !ok {
-		return nil, &TableIndexError{useName: true, notFoundName: columnName}
+		return nil, &IndexError{useName: true, notFoundName: columnName}
 	}
 	if len(t.Rows) <= rowIndex {
-		return nil, &TableIndexError{forRow: true, length: len(t.Rows), requested: rowIndex}
+		return nil, &IndexError{forRow: true, length: len(t.Rows), requested: rowIndex}
 	}
 	return t.Rows[rowIndex].Data[i], nil
 }
@@ -151,7 +150,7 @@ func (t *TableBuffer) GetScaler(rowIndex int, columnName string) (interface{}, e
 // Get a value from a given row index and column name.
 // Will panic if the requested column name is not found.  Useful for a single
 // value return with a hard coded column name.
-func (t *TableBuffer) MustGetScaler(rowIndex int, columnName string) interface{} {
+func (t *Buffer) MustGetScaler(rowIndex int, columnName string) interface{} {
 	v, err := t.GetScaler(rowIndex, columnName)
 	if err != nil {
 		panic(err)
@@ -159,15 +158,15 @@ func (t *TableBuffer) MustGetScaler(rowIndex int, columnName string) interface{}
 	return v
 }
 
-func (r RowBuffer) Get(columnName string) (interface{}, error) {
-	i, ok := r.ColumnNameMap[columnName]
+func (r Row) Get(columnName string) (interface{}, error) {
+	i, ok := r.ColumnNameLookup[columnName]
 	if !ok {
-		return nil, &TableIndexError{useName: true, notFoundName: columnName}
+		return nil, &IndexError{useName: true, notFoundName: columnName}
 	}
 	return r.Data[i], nil
 }
 
-func (r RowBuffer) MustGet(columnName string) interface{} {
+func (r Row) MustGet(columnName string) interface{} {
 	v, err := r.Get(columnName)
 	if err != nil {
 		panic(err)
@@ -176,16 +175,16 @@ func (r RowBuffer) MustGet(columnName string) interface{} {
 }
 
 // Returns a value based on a row object and a column name.
-func (t *TableBuffer) GetInRow(row RowBuffer, columnName string) (interface{}, error) {
-	i, ok := t.ColumnNameMap[columnName]
+func (t *Buffer) GetInRow(row Row, columnName string) (interface{}, error) {
+	i, ok := t.ColumnNameLookup[columnName]
 	if !ok {
-		return nil, &TableIndexError{useName: true, notFoundName: columnName}
+		return nil, &IndexError{useName: true, notFoundName: columnName}
 	}
 	return row.Data[i], nil
 }
 
 // Same as GetInRow excepts panics if an error is encountered.
-func (t *TableBuffer) MustGetInRow(row RowBuffer, columnName string) interface{} {
+func (t *Buffer) MustGetInRow(row Row, columnName string) interface{} {
 	v, err := t.GetInRow(row, columnName)
 	if err != nil {
 		panic(err)
