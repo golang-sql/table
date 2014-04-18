@@ -3,6 +3,7 @@ package table
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 )
 
@@ -10,6 +11,13 @@ import (
 type Row struct {
 	*Buffer `json:"-",xml:"-"`
 	Data    []interface{}
+}
+
+func (r Row) MarshalJSON() ([]byte, error) {
+	return json.Marshal(r.Data)
+}
+func (r Row) UnmarshalJSON(bb []byte) error {
+	return json.Unmarshal(bb, r.Data)
 }
 
 // A buffered data table.  ColumnNameLookup is the inverse of ColumnName.
