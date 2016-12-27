@@ -25,10 +25,10 @@ func (r Row) UnmarshalJSON(bb []byte) error {
 
 // Buffer is a result within memory.
 type Buffer struct {
-	Rows []Row
+	Columns []string
+	Rows    []Row
 
-	ColumnName       []string
-	ColumnNameLookup map[string]int
+	columnLookup map[string]int `json:"-",xml:"-",toml:"-"`
 }
 
 // Set stores a list of Buffers.
@@ -115,17 +115,17 @@ func FillSet(ctx context.Context, rows *sql.Rows) (Set, error) {
 				first = false
 
 				// Get the column names.
-				table.ColumnName, err = rows.Columns()
+				table.Columns, err = rows.Columns()
 				if err != nil {
 					return set, err
 				}
-				colCount = len(table.ColumnName)
+				colCount = len(table.Columns)
 
 				// Create an easy lookup that should be more efficent then
 				// always looping to lookup an index from a column name.
-				table.ColumnNameLookup = make(map[string]int, colCount)
-				for i, n := range table.ColumnName {
-					table.ColumnNameLookup[n] = i
+				table.columnLookup = make(map[string]int, colCount)
+				for i, n := range table.Columns {
+					table.columnLookup[n] = i
 				}
 
 				// Create a sized pointer slice.
@@ -160,7 +160,7 @@ func FillSet(ctx context.Context, rows *sql.Rows) (Set, error) {
 
 // RowValue of the field from the row index and named column.
 func (t *Buffer) RowValue(rowIndex int, columnName string) interface{} {
-	i, ok := t.ColumnNameLookup[columnName]
+	i, ok := t.columnLookup[columnName]
 	if !ok {
 		panic(&IndexError{useName: true, notFoundName: columnName})
 	}
@@ -172,7 +172,7 @@ func (t *Buffer) RowValue(rowIndex int, columnName string) interface{} {
 
 // Value of the field from the named column.
 func (r Row) Value(columnName string) interface{} {
-	i, ok := r.buf.ColumnNameLookup[columnName]
+	i, ok := r.buf.columnLookup[columnName]
 	if !ok {
 		panic(&IndexError{useName: true, notFoundName: columnName})
 	}
