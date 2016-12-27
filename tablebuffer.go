@@ -11,7 +11,7 @@ import (
 
 // Row hold field level data.
 type Row struct {
-	buf *Buffer
+	buf *Buffer `json:"-",xml:"-",toml:"-"`
 
 	Field []interface{}
 }
