@@ -57,7 +57,6 @@ func (tie *IndexError) Error() string {
 
 // NewSet returns a set of table buffers from the given query.
 func NewSet(ctx context.Context, db *sql.DB, sql string, params ...interface{}) (Set, error) {
-	fmt.Printf("\n\ntable: X\n\n")
 	rows, err := db.QueryContext(ctx, sql, params...)
 	if err != nil {
 		return nil, err
@@ -97,7 +96,6 @@ func NewScaler(ctx context.Context, db *sql.DB, sql string, params ...interface{
 // FillSet will take a sql query result and fill the buffer with
 // the entire result set.
 func FillSet(ctx context.Context, rows *sql.Rows) (Set, error) {
-	fmt.Printf("table: FillSet\n")
 	var out []interface{}
 	var dest []interface{}
 	var err error
@@ -121,7 +119,6 @@ func FillSet(ctx context.Context, rows *sql.Rows) (Set, error) {
 				if err != nil {
 					return set, err
 				}
-				fmt.Printf("table: set=%d cols=%q\n", len(set)+1, table.Columns)
 				colCount = len(table.Columns)
 
 				// Create an easy lookup that should be more efficent then
@@ -156,6 +153,10 @@ func FillSet(ctx context.Context, rows *sql.Rows) (Set, error) {
 		set = append(set, table)
 		if !rows.NextResultSet() {
 			break
+		}
+		first = false
+		table = &Buffer{
+			Rows: make([]Row, 0, 10),
 		}
 	}
 	return set, nil
