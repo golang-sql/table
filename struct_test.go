@@ -6,11 +6,13 @@ import (
 )
 
 func TestBufferToStruct(t *testing.T) {
-	type runner func(buf *Buffer) error
+	type runner func(buf *Buffer) (any, error)
 	list := []struct {
 		Name    string
 		Columns []string
 		Data    [][]any
+		Want    string
+		Error   string
 		Run     runner
 	}{
 		{
@@ -20,21 +22,66 @@ func TestBufferToStruct(t *testing.T) {
 				{int64(1), "R1"},
 				{int64(2), "R2"},
 			},
-			Run: func(buf *Buffer) error {
-				want := `[]table.S{table.S{ID:1, Name:"R1"}, table.S{ID:2, Name:"R2"}}`
+			Want: `[]table.S{table.S{ID:1, Name:"R1"}, table.S{ID:2, Name:"R2"}}`,
+			Run: func(buf *Buffer) (any, error) {
 				type S struct {
 					ID   int64
 					Name string
 				}
-				ss, err := BufferToStruct[S](buf)
-				if err != nil {
-					t.Fatal(err)
+				return BufferToStruct[S](buf)
+			},
+		},
+		{
+			// Extra buffer columns are allowed.
+			Name:    "extra-buffer",
+			Columns: []string{"ID", "Name", "Name2"},
+			Data: [][]any{
+				{int64(1), "R1", "X1"},
+				{int64(2), "R2", "X2"},
+			},
+			Want: `[]table.S{table.S{ID:1, Name:"R1"}, table.S{ID:2, Name:"R2"}}`,
+			Run: func(buf *Buffer) (any, error) {
+				type S struct {
+					ID   int64
+					Name string
 				}
-				got := fmt.Sprintf("%#v", ss)
-				if want != got {
-					return fmt.Errorf("got:\n%s\n\nwant:%s\n", got, want)
+				return BufferToStruct[S](buf)
+			},
+		},
+		{
+			// Extra struct fields are disallowed.
+			Name:    "extra-struct",
+			Columns: []string{"ID", "Name"},
+			Data: [][]any{
+				{int64(1), "R1"},
+				{int64(2), "R2"},
+			},
+			Error: `unused fields in struct ["Age"]`,
+			Run: func(buf *Buffer) (any, error) {
+				type S struct {
+					ID   int64
+					Name string
+					Age  int32
 				}
-				return nil
+				return BufferToStruct[S](buf)
+			},
+		},
+		{
+			// Extra struct fields are okay if ignored.
+			Name:    "extra-struct-okay",
+			Columns: []string{"ID", "Name"},
+			Data: [][]any{
+				{int64(1), "R1"},
+				{int64(2), "R2"},
+			},
+			Error: `unused fields in struct ["Age"]`,
+			Run: func(buf *Buffer) (any, error) {
+				type S struct {
+					ID   int64
+					Name string
+					Age  int32 `sql:"-"`
+				}
+				return BufferToStruct[S](buf)
 			},
 		},
 	}
@@ -47,9 +94,17 @@ func TestBufferToStruct(t *testing.T) {
 			for _, dr := range item.Data {
 				b.AddRow(dr)
 			}
-			err := item.Run(b)
+			v, err := item.Run(b)
+			var errs string
 			if err != nil {
-				t.Fatal(err)
+				errs = err.Error()
+			}
+			if g, w := errs, item.Error; g != w {
+				t.Fatalf("expected error: %s, got error: %s", w, g)
+			}
+			got := fmt.Sprintf("%#v", v)
+			if item.Want != got {
+				t.Fatalf("got:\n%s\n\nwant:%s\n", got, item.Want)
 			}
 		})
 	}
