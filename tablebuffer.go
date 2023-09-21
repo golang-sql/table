@@ -9,14 +9,14 @@ import (
 )
 
 type Queryer interface {
-	QueryContext(ctx context.Context, sql string, params ...interface{}) (*sql.Rows, error)
+	QueryContext(ctx context.Context, sql string, params ...any) (*sql.Rows, error)
 }
 
 // Row hold field level data.
 type Row struct {
 	columnNameIndex map[string]int
 
-	Field []interface{}
+	Field []any
 }
 
 func (r Row) MarshalJSON() ([]byte, error) {
@@ -73,7 +73,7 @@ func (tie *IndexError) Error() string {
 }
 
 // NewSet returns a set of table buffers from the given query.
-func NewSet(ctx context.Context, q Queryer, sql string, params ...interface{}) (Set, error) {
+func NewSet(ctx context.Context, q Queryer, sql string, params ...any) (Set, error) {
 	rows, err := q.QueryContext(ctx, sql, params...)
 	if err != nil {
 		return nil, err
@@ -84,7 +84,7 @@ func NewSet(ctx context.Context, q Queryer, sql string, params ...interface{}) (
 }
 
 // NewBuffer returns a new single table buffer.
-func NewBuffer(ctx context.Context, q Queryer, sql string, params ...interface{}) (table *Buffer, err error) {
+func NewBuffer(ctx context.Context, q Queryer, sql string, params ...any) (table *Buffer, err error) {
 	set, err := NewSet(ctx, q, sql, params...)
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func NewBuffer(ctx context.Context, q Queryer, sql string, params ...interface{}
 }
 
 // NewRow returns the first row.
-func NewRow(ctx context.Context, q Queryer, sql string, params ...interface{}) (Row, error) {
+func NewRow(ctx context.Context, q Queryer, sql string, params ...any) (Row, error) {
 	t, err := NewBuffer(ctx, q, sql, params...)
 	if err != nil {
 		return Row{}, err
@@ -109,7 +109,7 @@ func NewRow(ctx context.Context, q Queryer, sql string, params ...interface{}) (
 }
 
 // NewScaler returns the first field in the first row.
-func NewScaler(ctx context.Context, q Queryer, sql string, params ...interface{}) (interface{}, error) {
+func NewScaler(ctx context.Context, q Queryer, sql string, params ...any) (any, error) {
 	t, err := NewBuffer(ctx, q, sql, params...)
 	if err != nil {
 		return nil, err
@@ -127,8 +127,8 @@ func NewScaler(ctx context.Context, q Queryer, sql string, params ...interface{}
 // FillSet will take a sql query result and fill the buffer with
 // the entire result set.
 func FillSet(ctx context.Context, rows *sql.Rows) (Set, error) {
-	var out []interface{}
-	var dest []interface{}
+	var out []any
+	var dest []any
 	var err error
 
 	var set Set = make([]*Buffer, 0, 3)
@@ -160,10 +160,10 @@ func FillSet(ctx context.Context, rows *sql.Rows) (Set, error) {
 				}
 
 				// Create a sized pointer slice.
-				dest = make([]interface{}, colCount)
+				dest = make([]any, colCount)
 			}
 			// Create a new data slice that will be appended on to the table.
-			out = make([]interface{}, colCount)
+			out = make([]any, colCount)
 
 			// Scanning requires having a pointer to the data slice,
 			// so first make a pointer slice to each element of the data slice.
@@ -194,7 +194,7 @@ func FillSet(ctx context.Context, rows *sql.Rows) (Set, error) {
 }
 
 // Get the field from the row index and named column.
-func (t *Buffer) Get(rowIndex int, columnName string) interface{} {
+func (t *Buffer) Get(rowIndex int, columnName string) any {
 	i, ok := t.columnNameIndex[columnName]
 	if !ok {
 		panic(&IndexError{subject: indexErrorName, notFoundName: columnName})
@@ -206,10 +206,31 @@ func (t *Buffer) Get(rowIndex int, columnName string) interface{} {
 }
 
 // Get the field from the named column.
-func (r Row) Get(columnName string) interface{} {
+func (r Row) Get(columnName string) any {
 	i, ok := r.columnNameIndex[columnName]
 	if !ok {
 		panic(&IndexError{subject: indexErrorName, notFoundName: columnName})
 	}
 	return r.Field[i]
+}
+
+// Add a new row to an existing Buffer.
+func (b *Buffer) AddRow(row []any) {
+	if b.Columns == nil {
+		panic("must set Columns first in Buffer")
+	}
+	if r, c := len(row), len(b.Columns); r != c {
+		panic(fmt.Errorf("row count %d is different then column schema count %d", r, c))
+	}
+	if b.columnNameIndex == nil {
+		cni := make(map[string]int, len(b.Columns))
+		for i, n := range b.Columns {
+			cni[n] = i
+		}
+		b.columnNameIndex = cni
+	}
+	b.Rows = append(b.Rows, Row{
+		Field:           row,
+		columnNameIndex: b.columnNameIndex,
+	})
 }
